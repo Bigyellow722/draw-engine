@@ -32,4 +32,25 @@ exe = executable(
   install : true,
 )
 
+# Dependency for libwayland client library
+wayland_dep = dependency('wayland-client')
+
+# Import Meson's Wayland module for protocol scanning
+wayland_mod = import('wayland')
+
+# Find the xdg-shell protocol XML (from wayland-protocols)
+xdg_xml = wayland_mod.find_protocol('xdg-shell')
+# Generate C sources and headers from the protocol
+xdg_sources = wayland_mod.scan_xml(xdg_xml)
+
+disp_srcs = ['display/display.c', 'display/window-wayland.c', 'utils/shm.c']
+
+# Build the executable
+disp_exe = executable('wayland-app',
+  disp_srcs,  # Your main source file
+  xdg_sources,  # Generated protocol sources
+  dependencies: wayland_dep,
+  install: true
+)
+
 test('basic', exe)
