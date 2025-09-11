@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include "window-wayland.h"
 #include "../utils/utils.h"
-#include "../utils/shm.h"
+#include "shm.h"
 
 /* xdg interfaces */
 /* The client need to send back a pong request */

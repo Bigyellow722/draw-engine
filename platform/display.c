@@ -1,6 +1,6 @@
 #include <assert.h>
 
-#include "window-wayland.h"
+#include "linux/window-wayland.h"
 
 #define WIDTH 800
 #define HEIGHT 600

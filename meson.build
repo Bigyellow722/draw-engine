@@ -43,7 +43,7 @@ xdg_xml = wayland_mod.find_protocol('xdg-shell')
 # Generate C sources and headers from the protocol
 xdg_sources = wayland_mod.scan_xml(xdg_xml)
 
-disp_srcs = ['display/display.c', 'display/window-wayland.c', 'utils/shm.c']
+disp_srcs = ['platform/display.c', 'platform/linux/window-wayland.c', 'platform/linux/shm.c']
 
 # Build the executable
 disp_exe = executable('wayland-app',
