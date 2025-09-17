@@ -4,9 +4,48 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <wayland-client.h>
+
+#include "../display.h"
 #include "window-wayland.h"
 #include "../utils/utils.h"
 #include "shm.h"
+#include "xdg-shell-client-protocol.h"
+
+
+struct wayland_context {
+  /* Global objects */
+  struct wl_display *display;
+  struct wl_registry *registry;
+  struct wl_shm *shm; // provide a format interface to set pixel format
+  void *shm_data;
+  struct wl_compositor *compositor;
+  struct xdg_wm_base *xdg_wm_base;
+  struct wl_seat *seat; // for handling events from input source, such as keyboard, pointer, touch and so on
+  /* the context of surface */
+  struct wl_surface *surface;
+  struct xdg_surface *xdg_surface;
+  struct xdg_toplevel *xdg_toplevel;
+  /* the context of buffer */
+  int fd; // move it to wayland context
+  uint8_t *pool_data; // move it to wayland context
+  int shm_pool_size; // move it to wayland context
+  struct wl_shm_pool *pool; // move it to wayland context
+  struct wl_buffer *buffer; // move it to wayland context
+  uint32_t *pixels;         // move it to wayland context
+  int index;
+  int offset;
+  int width;
+  int height;
+  int stride;
+  const char* name;
+  /* states */
+  bool configured;
+  bool should_close;
+};
+
 
 /* xdg interfaces */
 /* The client need to send back a pong request */
@@ -61,7 +100,7 @@ static void handle_global(void *data, struct wl_registry *registry,
                           uint32_t name, const char *interface,
                           uint32_t version) {
   struct wayland_context *ctx = (struct wayland_context *)data;
-  log("%s: name: %u interface: %s\n", __func__, name, interface);
+
   if (strcmp(interface, wl_shm_interface.name) == 0) {
     ctx->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
   } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
@@ -83,9 +122,50 @@ static const struct wl_registry_listener registry_listener = {
   .global_remove = handle_global_remove,
 };
 
+/* callbacks for buffer */
+static void
+wl_buffer_release(void *data, struct wl_buffer *wl_buffer)
+{
+    /* Sent by the compositor when it's no longer using this buffer */
+    wl_buffer_destroy(wl_buffer);
+}
+
+static const struct wl_buffer_listener wl_buffer_listener = {
+    .release = wl_buffer_release,
+};
+
+
+/* callbacks for frame */
+static const struct wl_callback_listener wl_surface_frame_listener;
+
+
+static void wl_surface_frame_done(void *data, struct wl_callback *cb,
+                                  uint32_t time)
+{
+  /*
+  Now, with each frame, we'll
+  1. Destroy the now-used frame callback.
+  2. Request a new callback for the next frame.
+  3. Render and submit the new frame.
+  The third step, broken down, is:
+  1. Update our state with a new offset, using the time since the last frame to scroll at a consistent rate.
+  2. Prepare a new wl_buffer and render a frame for it.
+  3. Attach the new wl_buffer to our surface.
+  4. Damage the entire surface.
+  5. Commit the surface.
+*/
+  wl_callback_destroy(cb);
+  struct wayland_context *ctx = (struct wayland_context *)data;
+  cb = wl_surface_frame(ctx->surface);
+  wl_callback_add_listener(cb, &wl_surface_frame_listener, ctx);
+}
+
+static const struct wl_callback_listener wl_surface_frame_listener = {
+  .done = wl_surface_frame_done,
+};
 
 /* wayland context interfaces */
-struct wayland_context *wayland_ctx_make(void) {
+void *wayland_ctx_make(const char* name, int height, int width, int stride) {
   struct wayland_context *new = NULL;
   new = malloc(sizeof(struct wayland_context));
   if (!new)
@@ -102,11 +182,23 @@ struct wayland_context *wayland_ctx_make(void) {
   new->xdg_toplevel = NULL;
   new->configured = false;
   new->should_close = false;
+  new->fd = -1;
+  new->pool_data = NULL;
+  new->shm_pool_size = stride * height * 2;
+  new->pool = NULL;
+  new->index = 0;
+  new->offset = 0;
+  new->buffer = NULL;
+  new->pixels = NULL;
+  new->width = width;
+  new->height = height;
+  new->stride = stride;
+  new->name = name;
   return new;
 }
 
-void wayland_ctx_free(struct wayland_context **pctx) {
-  struct wayland_context *ctx = *pctx;
+void wayland_ctx_free(void **pctx) {
+  struct wayland_context *ctx = *(struct wayland_context **)pctx;
   if (ctx) {
     free(ctx);
     ctx = NULL;
@@ -117,7 +209,8 @@ static int is_context_noready(struct wayland_context *ctx) {
   return (ctx->shm == NULL || ctx->compositor == NULL || ctx->xdg_wm_base == NULL);
 }
 
-int wayland_ctx_setup(struct wayland_context *ctx) {
+int wayland_ctx_setup(void *vctx) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
   /* use WAYLAND_DISPLAY (the default value is wayland-0) if passing NULL to this function */
   ctx->display = wl_display_connect(NULL);
   if (!ctx->display) {
@@ -167,82 +260,83 @@ int wayland_ctx_setup(struct wayland_context *ctx) {
   ctx->xdg_surface =
     xdg_wm_base_get_xdg_surface(ctx->xdg_wm_base, ctx->surface);
   ctx->xdg_toplevel = xdg_surface_get_toplevel(ctx->xdg_surface);
+  xdg_toplevel_set_title(ctx->xdg_toplevel, ctx->name);
   xdg_surface_add_listener(ctx->xdg_surface, &xdg_surface_listener, ctx);
   xdg_toplevel_add_listener(ctx->xdg_toplevel, &xdg_toplevel_listener, ctx);
   wl_surface_commit(ctx->surface);
+
+  //struct wl_callback *frame_cb = wl_surface_frame(ctx->surface);
+  //wl_callback_add_listener(frame_cb, &wl_surface_frame_listener, ctx);
+
   while ((wl_display_dispatch(ctx->display)) != -1 && !ctx->configured) {
     log("Waiting for the configure event\n");
   }
-  return 0;
-}
 
-void wayland_ctx_cleanup(struct wayland_context *ctx) {
-  wl_surface_destroy(ctx->surface);
-  wl_registry_destroy(ctx->registry);
-  wl_display_disconnect(ctx->display);
-}
-
-
-struct window_context *win_ctx_make(struct wayland_context *ctx, int width,
-                                    int height) {
-  assert(ctx != NULL);
-  struct window_context *new = NULL;
-  new = malloc(sizeof(struct window_context));
-  if (!new) {
-    return NULL;
-  }
-  new->wayland_ctx = ctx;
-  new->width = width;
-  new->height = height;
-  new->stride = width * 4;
-  new->fd = -1;
-  new->pool_data = NULL;
-  new->shm_pool_size = new->stride * new->height * 2;
-  new->pool = NULL;
-  new->index = 0;
-  new->offset = new->stride * new->height * new->index;
-  new->buffer = NULL;
-  new->pixels = NULL;
-  return new;
-}
-
-void win_ctx_free(struct window_context** pwin_ctx) {
-  struct window_context *win_ctx = *pwin_ctx;
-  if (win_ctx) {
-    free(win_ctx);
-    win_ctx = NULL;
-  }
-}
-
-static void
-wl_buffer_release(void *data, struct wl_buffer *wl_buffer)
-{
-    /* Sent by the compositor when it's no longer using this buffer */
-    wl_buffer_destroy(wl_buffer);
-}
-
-static const struct wl_buffer_listener wl_buffer_listener = {
-    .release = wl_buffer_release,
-};
-
-int win_context_setup(struct window_context *ctx) {
-  int ret = 0;
   ctx->fd = allocate_shm_file(ctx->shm_pool_size);
+  if (ctx->fd == -1) {
+    err_log("failed to alloc shm file\n");
+    return EXIT_FAILURE;
+  }
   ctx->pool_data = mmap(NULL, ctx->shm_pool_size, PROT_READ | PROT_WRITE,
                         MAP_SHARED, ctx->fd, 0);
+  if (ctx->pool_data == MAP_FAILED) {
+    err_log("failed to mmap %d for pool_data", ctx->shm_pool_size);
+    return EXIT_FAILURE;
+  }
   ctx->pool =
-    wl_shm_create_pool(ctx->wayland_ctx->shm, ctx->fd, ctx->shm_pool_size);
+    wl_shm_create_pool(ctx->shm, ctx->fd, ctx->shm_pool_size);
   ctx->buffer =
       wl_shm_pool_create_buffer(ctx->pool, ctx->offset, ctx->width, ctx->height,
                                 ctx->stride, WL_SHM_FORMAT_XRGB8888);
   wl_buffer_add_listener(ctx->buffer, &wl_buffer_listener, NULL);
   ctx->pixels = (uint32_t *)&ctx->pool_data[ctx->offset];
-  return ret;
+
+  return 0;
 }
 
-void win_context_cleanup(struct window_context *ctx) {
+void wayland_ctx_cleanup(void* vctx) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
   wl_buffer_destroy(ctx->buffer);
   wl_shm_pool_destroy(ctx->pool);
   munmap(ctx->pool_data, ctx->shm_pool_size);
   close(ctx->fd);
+  wl_surface_destroy(ctx->surface);
+  wl_registry_destroy(ctx->registry);
+  wl_display_disconnect(ctx->display);
 }
+
+void wayland_ctx_fill_buffer(void *vctx, void *bitmap,
+                             int len) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
+  assert(len <= ctx->stride * ctx->height);
+  memcpy((void *)ctx->pixels, bitmap, len);
+}
+
+void wayland_ctx_commit_buffer(void *vctx) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
+  log("%s, begin\n", __func__);
+  wl_surface_attach(ctx->surface, ctx->buffer, 0, 0);
+  wl_surface_damage(ctx->surface, 0, 0, UINT32_MAX, UINT32_MAX);
+  wl_surface_commit(ctx->surface);
+  log("%s, end\n", __func__);
+}
+
+void wayland_ctx_sync(void *vctx) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
+  int ret = 0;
+  while ((ret = wl_display_dispatch(ctx->display)) != -1) {
+  }
+}
+
+static struct win_ctx_ops wayland_ctx_ops = {
+    .priv_make = wayland_ctx_make,
+    .priv_free = wayland_ctx_free,
+    .priv_setup = wayland_ctx_setup,
+    .priv_cleanup = wayland_ctx_cleanup,
+    .fill_buffer = wayland_ctx_fill_buffer,
+    .commit_buffer = wayland_ctx_commit_buffer,
+    .sync = wayland_ctx_sync,
+};
+
+
+void window_wayland_init(void) { win_ctx_ops_register(&wayland_ctx_ops); }
