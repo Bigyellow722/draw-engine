@@ -296,7 +296,7 @@ int wayland_ctx_setup(void *vctx) {
 
 void wayland_ctx_cleanup(void* vctx) {
   struct wayland_context *ctx = (struct wayland_context *)vctx;
-  wl_buffer_destroy(ctx->buffer);
+  //wl_buffer_destroy(ctx->buffer);
   wl_shm_pool_destroy(ctx->pool);
   munmap(ctx->pool_data, ctx->shm_pool_size);
   close(ctx->fd);
@@ -321,11 +321,9 @@ void wayland_ctx_commit_buffer(void *vctx) {
   log("%s, end\n", __func__);
 }
 
-void wayland_ctx_sync(void *vctx) {
+int wayland_ctx_sync(void *vctx) {
   struct wayland_context *ctx = (struct wayland_context *)vctx;
-  int ret = 0;
-  while ((ret = wl_display_dispatch(ctx->display)) != -1) {
-  }
+  return wl_display_dispatch(ctx->display);
 }
 
 static struct win_ctx_ops wayland_ctx_ops = {
@@ -335,7 +333,7 @@ static struct win_ctx_ops wayland_ctx_ops = {
     .priv_cleanup = wayland_ctx_cleanup,
     .fill_buffer = wayland_ctx_fill_buffer,
     .commit_buffer = wayland_ctx_commit_buffer,
-    .sync = wayland_ctx_sync,
+    .poll_events = wayland_ctx_sync,
 };
 
 

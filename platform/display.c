@@ -34,29 +34,24 @@ struct window_context *win_ctx_make(const char* name, int width,
   new->height = height;
   new->stride = width * 4;
   new->priv = g_win_ctx_ops->priv_make(name, height, width, width * 4);
+  int ret = g_win_ctx_ops->priv_setup(new->priv);
+  if (ret) {
+    g_win_ctx_ops->priv_free(&new->priv);
+    return NULL;
+  }
   return new;
 }
 
 void win_ctx_free(struct window_context** pwin_ctx) {
   struct window_context *win_ctx = *pwin_ctx;
   if (win_ctx) {
-    g_win_ctx_ops->priv_free(&win_ctx->priv);
+    g_win_ctx_ops->priv_cleanup(win_ctx->priv);
+    if (win_ctx->priv)
+      g_win_ctx_ops->priv_free(&win_ctx->priv);
     free(win_ctx);
     win_ctx = NULL;
   }
 }
-
-
-int win_context_setup(struct window_context *ctx) {
-  int ret = 0;
-  ret = g_win_ctx_ops->priv_setup(ctx->priv);
-  return ret;
-}
-
-void win_context_cleanup(struct window_context *ctx) {
-  g_win_ctx_ops->priv_cleanup(ctx->priv);
-}
-
 
 static void pixel_buffer_init(uint32_t *buf, int height, int width, uint32_t value) {
   for (int y = 0; y < height; ++y) {
@@ -75,8 +70,8 @@ void win_context_buffer_draw(struct window_context *ctx, void* bitmap, int len) 
   g_win_ctx_ops->commit_buffer(ctx->priv);
 }
 
-void win_ctx_sync(struct window_context *ctx) {
-  g_win_ctx_ops->sync(ctx->priv);
+int win_ctx_poll_events(struct window_context *ctx) {
+  return g_win_ctx_ops->poll_events(ctx->priv);
 }
 
 int main(void) {
@@ -84,18 +79,16 @@ int main(void) {
   window_system_init();
   struct window_context *win_ctx = NULL;
   win_ctx = win_ctx_make("helloworld", WIDTH, HEIGHT);
-  ret = win_context_setup(win_ctx);
-  if (ret)
+  if (!win_ctx)
     return 1;
   uint32_t *pixels = malloc(win_ctx->height * win_ctx->stride);
   if (pixels) {
     memset(pixels, 0, win_ctx->height * win_ctx->stride);
     pixel_buffer_init(pixels, win_ctx->height, win_ctx->width, 0xFF666666);
     win_context_buffer_draw(win_ctx, pixels, win_ctx->height * win_ctx->stride);
-    win_ctx_sync(win_ctx);
+    while (win_ctx_poll_events(win_ctx)!=0) {}
     printf("0000000000\n");
   }
-  win_context_cleanup(win_ctx);
   win_ctx_free(&win_ctx);
   return ret;
 }

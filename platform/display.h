@@ -9,7 +9,7 @@ struct win_ctx_ops {
   void (*fill_buffer)(void *priv, void *bitmap,
                                  int len);
   void (*commit_buffer)(void *priv);
-  void (*sync)(void *priv);
+  int (*poll_events)(void *priv);
 };
 
 struct window_context {
