@@ -154,6 +154,7 @@ static void wl_surface_frame_done(void *data, struct wl_callback *cb,
   struct wayland_context *ctx = (struct wayland_context *)data;
   cb = wl_surface_frame(ctx->surface);
   wl_callback_add_listener(cb, &wl_surface_frame_listener, ctx);
+  log("%s: time: %u\n", __func__, time);
 }
 
 static const struct wl_callback_listener wl_surface_frame_listener = {
@@ -172,8 +173,8 @@ int wayland_ctx_create_surface(void *vctx, const char *name) {
   xdg_toplevel_add_listener(ctx->xdg_toplevel, &xdg_toplevel_listener, ctx);
   wl_surface_commit(ctx->surface);
 
-  //struct wl_callback *frame_cb = wl_surface_frame(ctx->surface);
-  //wl_callback_add_listener(frame_cb, &wl_surface_frame_listener, ctx);
+  struct wl_callback *frame_cb = wl_surface_frame(ctx->surface);
+  wl_callback_add_listener(frame_cb, &wl_surface_frame_listener, ctx);
 
   while ((wl_display_dispatch(ctx->display)) != -1 && !ctx->configured) {
     log("Waiting for the configure event\n");
@@ -286,7 +287,7 @@ static int is_context_noready(struct wayland_context *ctx) {
   return (ctx->shm == NULL || ctx->compositor == NULL || ctx->xdg_wm_base == NULL);
 }
 
-int wayland_ctx_setup(void *vctx, const char *name, int height, int width,
+int wayland_ctx_create_window(void *vctx, const char *name, int height, int width,
                       int stride) {
   int shm_pool_size = stride * height * 2;
   struct wayland_context *ctx = (struct wayland_context *)vctx;
@@ -353,7 +354,7 @@ int wayland_ctx_setup(void *vctx, const char *name, int height, int width,
   return 0;
 }
 
-void wayland_ctx_cleanup(void* vctx) {
+void wayland_ctx_close_window(void* vctx) {
   struct wayland_context *ctx = (struct wayland_context *)vctx;
 
   wayland_ctx_free_shm_pool(ctx, ctx->shm_pool_size);
@@ -362,13 +363,17 @@ void wayland_ctx_cleanup(void* vctx) {
   wl_display_disconnect(ctx->display);
 }
 
-
+bool wayland_ctx_window_should_close(void *vctx) {
+  struct wayland_context *ctx = (struct wayland_context *)vctx;
+  return ctx->should_close;
+}
 
 static struct win_ctx_ops wayland_ctx_ops = {
     .ctx_make = wayland_ctx_make,
     .ctx_free = wayland_ctx_free,
-    .create_window = wayland_ctx_setup,
-    .close_window = wayland_ctx_cleanup,
+    .create_window = wayland_ctx_create_window,
+    .close_window = wayland_ctx_close_window,
+    .window_should_close = wayland_ctx_window_should_close,
     .get_pixel_buffer_ptr = wayland_ctx_get_pixel_buffer_ptr,
     .attach_buffer = wayland_ctx_attach_buffer,
     .commit_buffer = wayland_ctx_commit_buffer,

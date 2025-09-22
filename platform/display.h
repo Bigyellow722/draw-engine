@@ -2,6 +2,7 @@
 #define _DISPLAY_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 struct win_ctx_ops {
   void* (*ctx_make)(void);
@@ -9,6 +10,7 @@ struct win_ctx_ops {
   int (*create_window)(void *ctx, const char *name, int height, int width,
                       int stride);
   void (*close_window)(void *ctx);
+  bool (*window_should_close)(void *vctx);
   uint32_t* (*get_pixel_buffer_ptr)(void *ctx);
   void (*attach_buffer)(void *ctx, int x, int y);
   void (*commit_buffer)(void *ctx);

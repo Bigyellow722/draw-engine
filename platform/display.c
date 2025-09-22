@@ -71,7 +71,9 @@ int main(void) {
     return 1;
   ret = win_ctx_create_window("helloworld", WIDTH, HEIGHT);
   win_context_buffer_draw(HEIGHT, WIDTH, 0xFF666666);
-  while (win_ctx_poll_events(g_ctx)!=0) {}
+  while (!g_ctx->ops->window_should_close(g_ctx->ctx)) {
+    win_ctx_poll_events(g_ctx);
+  }
   //win_ctx_poll_events(g_ctx);
   win_ctx_close_window();
   return ret;
