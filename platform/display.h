@@ -1,31 +1,32 @@
 #ifndef _DISPLAY_H_
 #define _DISPLAY_H_
 
+#include <stdint.h>
+
 struct win_ctx_ops {
-  void* (*priv_make)(const char* name, int height, int width, int stride);
-  void (*priv_free)(void **priv);
-  int (*priv_setup)(void *priv);
-  void (*priv_cleanup)(void *priv);
-  void (*fill_buffer)(void *priv, void *bitmap,
-                                 int len);
-  void (*commit_buffer)(void *priv);
-  int (*poll_events)(void *priv);
+  void* (*ctx_make)(void);
+  void (*ctx_free)(void **ctx);
+  int (*create_window)(void *ctx, const char *name, int height, int width,
+                      int stride);
+  void (*close_window)(void *ctx);
+  uint32_t* (*get_pixel_buffer_ptr)(void *ctx);
+  void (*attach_buffer)(void *ctx, int x, int y);
+  void (*commit_buffer)(void *ctx);
+  int (*poll_events)(void *ctx);
 };
 
-struct window_context {
-  void *priv;
-  int width;
-  int height;
-  int stride;
+struct win_ctx {
+  struct win_ctx_ops *ops;
+  void *ctx;
 };
+
 
 void win_ctx_ops_register(struct win_ctx_ops* ops);
 
-struct window_context *win_ctx_make(const char* name, int width,
-                                    int height);
-void win_ctx_free(struct window_context **pwin_ctx);
-int win_context_setup(struct window_context *ctx);
-void win_context_cleanup(struct window_context *ctx);
+int win_ctx_init(void);
+
+int win_context_setup(struct win_ctx *ctx);
+void win_context_cleanup(struct win_ctx *ctx);
 
   
 #endif

@@ -9,8 +9,7 @@
 #define WIDTH 800
 #define HEIGHT 600
 
-
-struct win_ctx_ops *g_win_ctx_ops = NULL;
+struct win_ctx *g_ctx = NULL;
 
 void window_system_init(void) {
   window_wayland_init();
@@ -18,39 +17,27 @@ void window_system_init(void) {
 
 void win_ctx_ops_register(struct win_ctx_ops *ops) {
   assert(ops != NULL);
-  g_win_ctx_ops = ops;
+  g_ctx->ops = ops;
 }
 
 
-struct window_context *win_ctx_make(const char* name, int width,
-                                    int height) {
+int win_ctx_init(void) {
+  g_ctx = malloc(sizeof(struct win_ctx));
+  if (!g_ctx) {
+    return 1;
+  }
+  window_system_init();
+  g_ctx->ctx = g_ctx->ops->ctx_make();
+  return 0;
+}
+
+int win_ctx_create_window(const char *name, int width, int height) {
   assert(name != NULL);
-  struct window_context *new = NULL;
-  new = malloc(sizeof(struct window_context));
-  if (!new) {
-    return NULL;
-  }
-  new->width = width;
-  new->height = height;
-  new->stride = width * 4;
-  new->priv = g_win_ctx_ops->priv_make(name, height, width, width * 4);
-  int ret = g_win_ctx_ops->priv_setup(new->priv);
-  if (ret) {
-    g_win_ctx_ops->priv_free(&new->priv);
-    return NULL;
-  }
-  return new;
+  return g_ctx->ops->create_window(g_ctx->ctx, name, height, width, width * 4);
 }
 
-void win_ctx_free(struct window_context** pwin_ctx) {
-  struct window_context *win_ctx = *pwin_ctx;
-  if (win_ctx) {
-    g_win_ctx_ops->priv_cleanup(win_ctx->priv);
-    if (win_ctx->priv)
-      g_win_ctx_ops->priv_free(&win_ctx->priv);
-    free(win_ctx);
-    win_ctx = NULL;
-  }
+void win_ctx_close_window(void) {
+  g_ctx->ops->close_window(g_ctx->ctx);
 }
 
 static void pixel_buffer_init(uint32_t *buf, int height, int width, uint32_t value) {
@@ -65,30 +52,27 @@ static void pixel_buffer_init(uint32_t *buf, int height, int width, uint32_t val
   }
 }
 
-void win_context_buffer_draw(struct window_context *ctx, void* bitmap, int len) {
-  g_win_ctx_ops->fill_buffer(ctx->priv, bitmap, len);
-  g_win_ctx_ops->commit_buffer(ctx->priv);
+void win_context_buffer_draw(int height, int width, uint32_t value) {
+  uint32_t *pixels = g_ctx->ops->get_pixel_buffer_ptr(g_ctx->ctx);
+  pixel_buffer_init(pixels, height, width, value);
+  g_ctx->ops->attach_buffer(g_ctx->ctx, 0, 0);
+  g_ctx->ops->commit_buffer(g_ctx->ctx);
 }
 
-int win_ctx_poll_events(struct window_context *ctx) {
-  return g_win_ctx_ops->poll_events(ctx->priv);
+
+int win_ctx_poll_events(struct win_ctx *ctx) {
+  return g_ctx->ops->poll_events(ctx->ctx);
 }
 
 int main(void) {
   int ret = 0;
-  window_system_init();
-  struct window_context *win_ctx = NULL;
-  win_ctx = win_ctx_make("helloworld", WIDTH, HEIGHT);
-  if (!win_ctx)
+  ret = win_ctx_init();
+  if (ret)
     return 1;
-  uint32_t *pixels = malloc(win_ctx->height * win_ctx->stride);
-  if (pixels) {
-    memset(pixels, 0, win_ctx->height * win_ctx->stride);
-    pixel_buffer_init(pixels, win_ctx->height, win_ctx->width, 0xFF666666);
-    win_context_buffer_draw(win_ctx, pixels, win_ctx->height * win_ctx->stride);
-    while (win_ctx_poll_events(win_ctx)!=0) {}
-    printf("0000000000\n");
-  }
-  win_ctx_free(&win_ctx);
+  ret = win_ctx_create_window("helloworld", WIDTH, HEIGHT);
+  win_context_buffer_draw(HEIGHT, WIDTH, 0xFF666666);
+  while (win_ctx_poll_events(g_ctx)!=0) {}
+  //win_ctx_poll_events(g_ctx);
+  win_ctx_close_window();
   return ret;
 }
