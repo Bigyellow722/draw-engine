@@ -6,8 +6,8 @@
 #include "linux/window-wayland.h"
 #include "display.h"
 
-#define WIDTH 800
-#define HEIGHT 600
+#define WIDTH 2560
+#define HEIGHT 1440
 
 struct win_ctx *g_ctx = NULL;
 
@@ -40,13 +40,14 @@ void win_ctx_close_window(void) {
   g_ctx->ops->close_window(g_ctx->ctx);
 }
 
+/* A R G B */
 static void pixel_buffer_init(uint32_t *buf, int height, int width, uint32_t value) {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       if ((x + y / 8 * 8) % 16 < 8) {
 	buf[y * width + x] = value;
       } else {
-	buf[y * width + x] = 0xFFEEEEEE;
+	buf[y * width + x] = 0xFFFFFFFF;
       }
     }
   }
@@ -70,11 +71,11 @@ int main(void) {
   if (ret)
     return 1;
   ret = win_ctx_create_window("helloworld", WIDTH, HEIGHT);
-  win_context_buffer_draw(HEIGHT, WIDTH, 0xFF666666);
+  win_context_buffer_draw(HEIGHT, WIDTH, 0xFF000000);
   while (!g_ctx->ops->window_should_close(g_ctx->ctx)) {
     win_ctx_poll_events(g_ctx);
+    //update_pixel_buffer();
   }
-  //win_ctx_poll_events(g_ctx);
   win_ctx_close_window();
   return ret;
 }
