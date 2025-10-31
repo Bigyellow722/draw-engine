@@ -1,0 +1,16 @@
+#+title: how to use frame in wayland
+#+auther: lhkwqy
+#+date:
+
+* flow
+
+1. the client connects to the compsitor
+2. get regisry
+3. register the global variable needed by client
+4. create surface
+   1. create the ~wl_surface~
+   2. get the ~xdg_surface~ and the ~toplevel~ from the ~wl_surface~.
+   3. add ~xdg_surface~ listener and set configure callback for ~xdg_surface~
+   4. add ~xdg_toplevel~ listener and set configure and close callbacks for ~xdg_toplevel~
+5. new a frame by calling ~wl_surface_frame~
+   1. 

@@ -1,0 +1,210 @@
+#+title: The main flow of wayland client
+#+author: lhkwqy
+#+date:
+
+
+* The simple client
+
+** the abstruction of objects
+
+*** ~display~
+
+The global variable in client is used to talk to the global variable of the wayland compositor.
+
+#+begin_src c
+  struct display {
+  	struct wl_display *display;
+  	struct wl_registry *registry;
+  	struct wl_compositor *compositor;
+  	struct xdg_wm_base *wm_base;
+  	struct wl_seat *seat;
+  	struct wl_keyboard *keyboard;
+  	struct wl_shm *shm;
+  	const struct format *format;
+  	bool paint_format;
+  	bool has_format;
+  };
+#+end_src
+
+Excluding the three fields related to format, all other fields are used to interact with the compositor global variables.
+
+#+begin_src c
+  struct format {
+  	uint32_t code;
+  	const char *string;
+  	int bpp;
+  	uint64_t color[4];
+  };
+#+end_src
+
+The constructor api and the destructor api for the struct display are 
+
+#+begin_src c
+  struct display *
+  create_display(const struct format *format, bool paint_format);
+
+  void
+  destroy_display(struct display *display);
+#+end_src
+
+**** ~create_display~
+
+In ~create_display~, we mainly do two things, one is setting up connection to wayland compositor and register the listeners of those global variables, the other is initializing the struct format.
+
+For the simplest full function wayland client, it's necessary that we get the handles of the ~wl_compositor~, ~xdg_wm_base~, ~wl_seat~ and ~wl_shm~.
+
+***** ~wl_compositor~
+
+The compositor is in charge of combining the contents of multiple surfaces into one displayable output.
+
+***** ~xdg_wm_base~
+
+The ~xdg_wm_base~ interface is exposed as a global object enabling client to turn their ~wl_surfaces~ into windows in a desktop environment.
+
+When having gotten the handle of ~xdg_wm_base~, a client needs to register a ~xdg_wm_base_listener~ with a callback for ping event. In the callback, the client should send a pong message back to compositor.
+
+***** ~wl_seat~
+
+A seat is a group of keyboards, pointer and touch devices. This object is published as a global during start up, or when such a device is hot plugged.
+
+The ~wl_seat_listener~ is used for enabling the client to set up other globals for input, such as keyboard and so on.
+
+***** ~wl_shm~
+
+A singleton global object that provides support for shared memory. Clients can create ~wl_shm_pool~ objects using the ~create_pool~ request.
+
+
+
+
+*** ~window~
+
+The structure definition:
+
+#+begin_src c
+  struct window {
+  	struct display *display;
+  	int width, height;
+  	int init_width, init_height;
+  	struct wl_surface *surface;
+  	struct xdg_surface *xdg_surface;
+  	struct xdg_toplevel *xdg_toplevel;
+  	struct wl_list buffer_list;
+  	struct buffer *prev_buffer;
+  	struct wl_callback *callback;
+  	bool wait_for_configure;
+  	bool maximized;
+  	bool fullscreen;
+  	bool needs_update_buffer;
+  };
+#+end_src
+
+
+The client only have one window object, just like display. The functions of windows are as following
+
+1. create ~wl_surface~
+2. set the role of ~wl_surface~ to ~xdg_surface~, and get the ~xdg_toplevel~.
+3. mantain a ~wl_buffer~ list for the buffer used in frame callback.
+
+**** ~wl_surface~
+
+Initially a ~wl_surface~ does not have a role. A surface can have only one role at a time.
+
+There are four events for ~wl_surface~:
+1. enter
+   This is emitted whenever a surface's creation, movement, or resizing results in some part of it being within the scanout region of output.
+2. leave
+   This is emitted whenever a surface's creation, movement, or resizing results in *it no longer having any part of it* within the scanout region of an output.
+3. perferred_buffer_scale
+4. perferred_buffer_transform
+   Both of those two event are sent whenever the compositor's perference changes.
+
+
+**** ~xdg_surface~
+
+~xdg_surface~ provides a base set of functionality required to construct user interface elements requiring management by the compositor, such as toplevel windows, menus, etc.
+
+Creating an ~xdg_surface~ does not set the role for a ~wl_surface~. In order to map an ~xdg_surface~, the client must create a role-specific object using, e.g., ~get_toplevel~, ~get_popup~.
+
+The client must call ~wl_surface.commit~ on the corresponding ~wl_surface~ for the ~xdg_surface~ state to take effect.
+
+Creating an ~xdg_surface~ from a ~wl_surface~ which has a buffer attached or committed is a client error, and any attempts by a client to attach or manipulate a buffer prior to the first ~xdg_surface.configure~ call must also be treated as errors.
+
+After creating a role-specific object and setting it up(e.g. by sending the title, app ID, size constraints, parent, etc), the client must perform an initial commit without any buffer attached. The compositor will reply with initial ~wl_surface~ state such as ~wl_surace.preferred_buffer_scale~ followed by an ~xdg_surface.configure~ event. The client must acknowledge it and is then allowed to attach a buffer to map the surface.
+
+For an ~xdg_surface~ to be mapped by the compositor, the following conditions must be met:(1)
+
+The configure event marks the end of a configure sequence. A configure sequence is a set if ibe ir nire events configuring the state of the ~xdg_surface~, including the final ~xdg_surface.configure~ event.
+
+**** ~xdg_toplevel~
+
+The interface defines an ~xdg_surface~ role which allows a surface to, among other thing, set window-like properties such as maximize, fullscreen, and minimize, set application-specific metadata like title and id, and well as trigger user interactive operations such as interactive resize and move.
+
+Unmapping an ~xdg_toplevel~ means that the surface cannot be shown by the compositor until it is explicitly mapped again. Attaching a null buffer to a toplevel unmaps the surface.
+
+the ~xdg_toplevel~ on client side will handle four events:
+
+1. configure:
+   The configure event asks the client to resize its toplevel surface or change its state. The configured state should not be applied immediately.
+   #+begin_quote
+   When a configure event is received, if a client commits the surface in response to the configure event, then the client must make an ~ack_configure~ request sometime before the commit request, passing along the serial of the configure event.
+   #+end_quote
+2. close:
+3. ~configure_bounds~:
+4. ~wm_capabilities~:
+
+** the main flow
+
+1. setup the global display
+   1) client: ~wl_display_connect~
+   2) client: ~wl_display_get_registry~
+   3) client: ~wl_registry_add_listener(..., &registry_listener, ...)~
+   4) server: call the registry's callbacks of client, get ~wl_compositor~, ~xdg_wm_base~, ~wl_seat~, ~wl_shm~ and so on.
+   5) client: ~wl_display_roundtrip~, wait for the done event of callback created by ~wl_display_sync~.
+2. create the surface
+   1) client: create the ~wl_surface~, and register the enter and leave callbacks for ~wl_surface~
+   2) client: create the ~xdg_surface~, and set the role of ~xdg_surface~ to ~xdg_toplevel~, client should register the callback for ~xdg_surface.configure~ event, ~xdg_toplevel.configure~ event, ~xdg_toplevel.close~, and so on. client should wait for the completion of the ~xdg_surface~ configured by the compositor. 
+      When the compositor emits the ~xdg_surface.configure~ event to client, client should send ~ack_configure~.
+      The client maintains the size of window. When the client receiving the ~xdg_toplevel.configure~ event, client should redraw on the surface.
+      The order of those surface event happening is:
+      client: create the necessary surfaces -> server
+      client: ~wl_surface.commit~ -> server
+      server: ~xdg_wm_base.ping~ -> client
+      client: ~xdg_wm_base.pong~ -> server
+      server: ~xdg_toplevel.configure~ -> client
+      server: ~xdg_surface.configure~ -> client /* client can redraw here, but redraw should happens after ~ack_configure~ */
+      client: ~xdg_surface.ack_configure~ -> server
+3. the client allocates the ~wl_buffer~ used by the surfaces.
+4. client should draw a picture on surface
+   1. pick a free buffer
+   2. memcpy image data to buffer
+   3. client: ~wl_surface_attach~
+   4. client: ~wl_surface_damage~
+   5. make a frame
+      1. destroy old frame. client: ~wl_callback_destroy~
+      2. ~wl_surface_frame~.
+      3. add listener. redraw will be called in frame_callback.
+      4. ~wl_surface_commit~.
+
+
+
+
+
+* The simple client with vulkan
+
+** the abstruction of objects
+
+
+** the main flow
+
+1. setup the global display
+   1) client: ~wl_display_connect~
+   2) client: ~wl_display_get_registry~
+   3) client: ~wl_registry_add_listener(..., &registry_listener, ...)~
+   4) server: call the registry's callbacks of client, get ~wl_compositor~, ~xdg_wm_base~, ~wl_seat~, ~wl_shm~ and so on.
+   5) client: ~wl_display_roundtrip~, wait for all callbacks finished.
+2. create the surface
+   1) client: create the ~wl_surface~, and register the enter and leave callbacks for ~wl_surface~
+   2) client: create the ~xdg_surface~, and set the role of ~xdg_surface~ to ~xdg_toplevel~, client should register the callback for ~xdg_surface.configure~ event, ~xdg_toplevel.configure~ event, ~xdg_toplevel.close~, and so on.
+      When the compositor emits the ~xdg_surface.configure~ event to client, client should send ~ack_configure~.
+      The client maintains the size of window. When the client receiving the ~xdg_toplevel.configure~ event, client should 
+   3) client: should wait for the completion of the ~xdg_surface~ configured by the compositor. 

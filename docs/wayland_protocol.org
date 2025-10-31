@@ -1,0 +1,36 @@
+#+title: how does ~wl_display_dispatch work~
+#+author: lhkwqy
+#+date:
+
+
+* objects
+
+** ~wl_display~
+
+*** the interfaces
+
+#+begin_src c
+struct wl_display * wl_display_connect(const char *name);
+#+end_src
+
+**** initialization
+
+while the global ~wl_display~ variable display being initialized, those following objects will be created and establish a connection to the wayland server socket.
+
+The default socket address is ~$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY~.
+
+
+** ~wl_connection~
+
+
+
+
+
+* the flow of ~wl_display_dispatch~
+
+#+begin_src c
+
+  - wl_display_dispatch_queue_timeout
+    - 
+
+#+end_src

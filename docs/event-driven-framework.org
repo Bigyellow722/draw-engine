@@ -1,0 +1,152 @@
+#+title: how to implement a event driven framework
+#+author: lhkwqy
+#+date:
+
+* Preface
+
+Starting with I/O events, there are some I/O mechanisms in linux, such as select, epoll and ~io_uring~. I'll give some example how to use those mechanisms
+
+** epoll
+
+#+begin_src c
+
+  int epoll_create1();
+
+  /* the timeout argument specifies the number of milliseconds that epoll_wait() will block
+   * all active events will be returned in events
+   */
+  int epoll_wait(int maxevents;
+                      int epfd, struct epoll_event events[maxevents],
+                      int maxevents, int timeout);
+
+#+end_src
+
+
+#+begin_src c
+  /* the maximum value of monitorable events */
+  #define MAX_EVENTS 10
+  /* ev is used for new event registered, events is used for epoll_wait */
+  struct epoll_event ev, events[MAX_EVENTS];
+  int epollfd;
+  int active_fd_num;
+  int target_fd1, target_fd2;
+
+  /* code to setup target_fd1 and target_fd2 */
+
+  /* create a epollfd */
+  epollfd = epoll_create1(0);
+  if (epollfd == -1) {
+  	perror("epoll_create1");
+  	exit(EXIT_FAILURE);
+  }
+
+  /* add a new fd to the epollfd */
+  ev.events = EPOLLIN;
+  ev.data.fd = target_fd1;
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, target_fd1, &ev) == -1) {
+  	perror("epoll_ctl: target_fd1");
+  	exit(EXIT_FAILURE);
+  }
+
+  ev.events = EPOLLIN;
+  ev.data.fd = target_fd2;
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, target_fd2, &ev) == -1) {
+  	perror("epoll_ctl: target_fd1");
+  	exit(EXIT_FAILURE);
+  }
+
+  while (1) {
+  	/* the last parameter is timeout */
+  	active_fd_num = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+  	if (active_fd_num == -1) {
+  		perror("epoll_wait");
+  		exit(EXIT_FAILURE);
+  	}
+
+  	/* handle all input from I/O */
+  	for (int n = 0; n < active_fd_num; n++) {
+  		if (events[n].data.fd == target_fd1) {
+  			/* handle input from target_fd1 */
+  		} else if (events[n].data.fd == target_fd2) {
+  			/* handle input from target_fd2 */
+  		} else {
+  			perror("not support");
+  		}
+  	}
+  }
+#+end_src
+
+** ~io_uring~
+
+related apis
+
+#+begin_src c
+
+  /*  */
+  int io_uring_queue_init_mem(unsigned entries, struct io_uring *ring,
+  				struct io_uring_params *p,
+  				void *buf, size_t buf_size) LIBURING_NOEXCEPT;
+  int io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
+  				struct io_uring_params *p) LIBURING_NOEXCEPT;
+  int io_uring_queue_init(unsigned entries, struct io_uring *ring,
+  			unsigned flags) LIBURING_NOEXCEPT;
+
+
+#+end_src
+
+
+#+begin_src c
+
+  
+
+#+end_src
+
+
+
+* The architecture
+
+
+input event                         
+  I/O input   ->                    ->  subscriber0
+  timer       ->  event dispatcher  ->  subscriber1
+  signal      ->                    ->  subscriber2
+
+** a example
+
+
+#+begin_src c
+
+  /* 1. event source should provide some event */
+  key_a_id = event_provide(event_dispatcher, IO_EVENT_TYPE);
+  timer1_id = event_provide(event_dispatcher, TIMER_TYPE);
+
+  /* 2. event subscriber should register the event */
+  subscribe_event_source(event_dispatcher, key_a_id, key_handler);
+  subscribe_event_source(event_dispatcher, timer1_id, key_handler);
+
+  /* in event loop */
+  struct event *handling = NULL;
+  while (1) {
+  	handling = event_dequeue(event_dispatcher);
+  	if (handling)
+  		event_dispatch(event_displatcher, handling);
+  }
+
+  /* in the event subscriber */
+  event_enqueue(event_dispatcher, key_a_id);
+  event_enqueue(event_dispatcher, timer1_id);
+#+end_src
+  
+
+* The implemention
+  
+** The event
+
+#+begin_src c
+
+  struct event {
+  	int id;
+  	int (*handler)();
+  };
+
+#+end_src
