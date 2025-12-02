@@ -53,4 +53,14 @@ disp_exe = executable('wayland-app',
   install: true
 )
 
+wayland_srcs = ['platform/linux/wl-test.c','platform/linux/shm.c']
+
+wayland_test = executable('wl-test',
+                          wayland_srcs,
+                          xdg_sources,
+                          dependencies: wayland_dep,
+                          install: true
+)
+
+
 test('basic', exe)
